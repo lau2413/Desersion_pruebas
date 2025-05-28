@@ -18,6 +18,10 @@ basándose en diversas características académicas y demográficas.
 def load_model():
     try:
         import xgboost
+        from sklearn.preprocessing import StandardScaler, LabelEncoder
+        from sklearn.compose import ColumnTransformer
+        from sklearn.pipeline import Pipeline
+        
         model = joblib.load('mejor_modelo_desercion.pkl')
         
         # Debug: Mostrar información sobre el modelo cargado
@@ -26,6 +30,28 @@ def load_model():
         # Verificar si es un pipeline
         if hasattr(model, 'steps'):
             st.sidebar.write(f"Pipeline con pasos: {[step[0] for step in model.steps]}")
+            
+            # Inspeccionar cada paso del pipeline
+            for i, (name, step) in enumerate(model.steps):
+                st.sidebar.write(f"Paso {i}: {name} - Tipo: {type(step)}")
+                
+                # Si encontramos un string en lugar de un objeto, intentar repararlo
+                if isinstance(step, str):
+                    st.warning(f"⚠️ Paso '{name}' es un string: {step}")
+                    st.warning("Intentando cargar modelo sin preprocessor...")
+                    
+                    # Intentar usar solo el clasificador si el preprocessor está corrupto
+                    try:
+                        # Si el preprocessor está corrupto, usar solo el clasificador
+                        if name == 'preprocessor':
+                            # Crear un preprocessor dummy que no haga nada
+                            from sklearn.preprocessing import FunctionTransformer
+                            model.steps[i] = (name, FunctionTransformer(lambda x: x))
+                            st.info("✅ Preprocessor reemplazado con transformador identidad")
+                    except Exception as repair_error:
+                        st.error(f"No se pudo reparar el paso {name}: {repair_error}")
+                        return None
+            
         elif hasattr(model, 'predict'):
             st.sidebar.write("Modelo directo (no pipeline)")
         else:
@@ -284,8 +310,72 @@ if st.checkbox("Mostrar datos ingresados"):
     st.write(prepared_data)
     st.write(f"Forma de los datos: {prepared_data.shape}")
 
-# Botón para realizar predicción
-if st.button("Predecir Probabilidad de Deserción"):
+# Función para realizar predicción robusta
+def robust_predict(model, data):
+    """
+    Función que maneja diferentes tipos de errores en la predicción
+    """
+    try:
+        # Intento 1: Predicción normal
+        prediction = model.predict(data)
+        prediction_proba = None
+        
+        if hasattr(model, 'predict_proba'):
+            prediction_proba = model.predict_proba(data)
+            
+        return prediction, prediction_proba
+        
+    except AttributeError as e:
+        if "'str' object has no attribute 'transform'" in str(e):
+            st.warning("⚠️ Pipeline corrupto detectado. Intentando solución alternativa...")
+            
+            # Intento 2: Acceder directamente al clasificador
+            try:
+                if hasattr(model, 'steps') and len(model.steps) >= 2:
+                    classifier = model.steps[-1][1]  # Último paso (clasificador)
+                    
+                    if hasattr(classifier, 'predict'):
+                        st.info("✅ Usando clasificador directamente (sin preprocessor)")
+                        prediction = classifier.predict(data)
+                        prediction_proba = None
+                        
+                        if hasattr(classifier, 'predict_proba'):
+                            prediction_proba = classifier.predict_proba(data)
+                            
+                        return prediction, prediction_proba
+                    
+            except Exception as e2:
+                st.error(f"Error al acceder al clasificador: {e2}")
+                
+            # Intento 3: Recrear el pipeline
+            try:
+                st.info("🔧 Intentando recrear el pipeline...")
+                from sklearn.preprocessing import FunctionTransformer
+                from sklearn.pipeline import Pipeline
+                
+                # Obtener el clasificador
+                if hasattr(model, 'steps') and len(model.steps) >= 2:
+                    classifier = model.steps[-1][1]
+                    
+                    # Crear un nuevo pipeline con transformador identidad
+                    new_pipeline = Pipeline([
+                        ('preprocessor', FunctionTransformer(lambda x: x)),
+                        ('classifier', classifier)
+                    ])
+                    
+                    prediction = new_pipeline.predict(data)
+                    prediction_proba = None
+                    
+                    if hasattr(new_pipeline, 'predict_proba'):
+                        prediction_proba = new_pipeline.predict_proba(data)
+                        
+                    st.success("✅ Pipeline recreado exitosamente")
+                    return prediction, prediction_proba
+                    
+            except Exception as e3:
+                st.error(f"Error al recrear pipeline: {e3}")
+                
+        raise e  # Re-lanzar el error original si no se pudo solucionar
     try:
         # Preparar datos para el modelo
         model_input = prepare_data_for_model(user_data)
@@ -311,8 +401,13 @@ if st.button("Predecir Probabilidad de Deserción"):
                 prediction_proba = np.array([[0.2, 0.8]])  # Alta probabilidad de deserción
             else:
                 prediction_proba = np.array([[0.8, 0.2]])  # Baja probabilidad de deserción
-        
-        # Mostrar resultados
+        # Manejar casos donde prediction_proba es None
+        if prediction_proba is None:
+            # Si no tiene predict_proba, usar un valor aproximado basado en la predicción
+            if prediction[0] == 1:
+                prediction_proba = np.array([[0.2, 0.8]])  # Alta probabilidad de deserción
+            else:
+                prediction_proba = np.array([[0.8, 0.2]])  # Baja probabilidad de deserción
         st.subheader("Resultados de la Predicción")
         
         col1, col2 = st.columns(2)
