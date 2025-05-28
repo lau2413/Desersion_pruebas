@@ -17,7 +17,14 @@ basándose en diversas características académicas y demográficas.
 @st.cache_resource
 def load_model():
     try:
+        import xgboost
         model = joblib.load('mejor_modelo_desercion.pkl')
+        
+        # Verificar que es un pipeline
+        if not hasattr(model, 'steps'):
+            st.error("El archivo cargado no es un pipeline de scikit-learn")
+            return None
+            
         return model
     except Exception as e:
         st.error(f"Error al cargar el modelo: {e}")
