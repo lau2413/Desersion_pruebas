@@ -1,6 +1,6 @@
 streamlit
 pandas
 scikit-learn
-xgboost==1.7.6
+xgboost==3.0.0
 joblib
 dill
