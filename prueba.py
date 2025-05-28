@@ -13,21 +13,32 @@ Esta aplicación predice la probabilidad de que un estudiante abandone sus estud
 basándose en diversas características académicas y demográficas.
 """)
 
-# Cargar el modelo (asegúrate de tener el archivo en el repositorio)
+# Cargar el modelo con mejor manejo de errores
 @st.cache_resource
 def load_model():
     try:
         import xgboost
         model = joblib.load('mejor_modelo_desercion.pkl')
         
-        # Verificar que es un pipeline
-        if not hasattr(model, 'steps'):
-            st.error("El archivo cargado no es un pipeline de scikit-learn")
+        # Debug: Mostrar información sobre el modelo cargado
+        st.sidebar.write(f"Tipo de modelo cargado: {type(model)}")
+        
+        # Verificar si es un pipeline
+        if hasattr(model, 'steps'):
+            st.sidebar.write(f"Pipeline con pasos: {[step[0] for step in model.steps]}")
+        elif hasattr(model, 'predict'):
+            st.sidebar.write("Modelo directo (no pipeline)")
+        else:
+            st.error("El objeto cargado no tiene método predict")
             return None
             
         return model
+    except FileNotFoundError:
+        st.error("No se encontró el archivo 'mejor_modelo_desercion.pkl'. Asegúrate de que esté en el directorio correcto.")
+        return None
     except Exception as e:
         st.error(f"Error al cargar el modelo: {e}")
+        st.error(f"Tipo de error: {type(e)}")
         return None
 
 model = load_model()
@@ -203,11 +214,17 @@ def get_user_input():
         'Father\'s occupation_Technicians/Associate Professionals': 1 if father_occupation == "Técnico/Profesional Asociado" else 0
     }
     
-    # Crear DataFrame con todas las columnas necesarias
-    features = pd.DataFrame(data, index=[0])
+    return data
+
+# Función para preparar los datos para el modelo
+def prepare_data_for_model(data_dict):
+    """
+    Convierte el diccionario de datos a DataFrame y asegura el formato correcto
+    """
+    # Crear DataFrame
+    df = pd.DataFrame([data_dict])
     
-    # Asegurarse de que todas las columnas estén presentes
-    # (añadir cualquier columna faltante con valor 0)
+    # Lista de todas las columnas esperadas (puedes necesitar ajustar esto según tu modelo)
     expected_columns = [
         'Application order', 'Daytime/evening attendance', 'Previous qualification (grade)', 
         'Admission grade', 'Displaced', 'Debtor', 'Tuition fees up to date', 'Gender', 
@@ -243,29 +260,57 @@ def get_user_input():
         'Father\'s occupation_Technicians/Associate Professionals'
     ]
     
+    # Agregar columnas faltantes con valor 0
     for col in expected_columns:
-        if col not in features.columns:
-            features[col] = 0
+        if col not in df.columns:
+            df[col] = 0
     
-    # Reordenar columnas para que coincidan con el orden de entrenamiento
-    features = features[expected_columns]
+    # Reordenar columnas para que coincidan con el orden esperado
+    df = df[expected_columns]
     
-    return features
+    # Asegurar tipos de datos correctos
+    for col in df.columns:
+        df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0)
+    
+    return df
 
 # Obtener input del usuario
-user_input = get_user_input()
+user_data = get_user_input()
 
 # Mostrar los datos ingresados (opcional)
 if st.checkbox("Mostrar datos ingresados"):
     st.subheader("Datos ingresados")
-    st.write(user_input)
+    prepared_data = prepare_data_for_model(user_data)
+    st.write(prepared_data)
+    st.write(f"Forma de los datos: {prepared_data.shape}")
 
 # Botón para realizar predicción
 if st.button("Predecir Probabilidad de Deserción"):
     try:
+        # Preparar datos para el modelo
+        model_input = prepare_data_for_model(user_data)
+        
+        # Debug: Mostrar información sobre los datos preparados
+        st.write(f"Forma de los datos de entrada: {model_input.shape}")
+        st.write(f"Tipos de datos: {model_input.dtypes.unique()}")
+        
+        # Verificar si hay valores NaN
+        if model_input.isnull().any().any():
+            st.warning("Se encontraron valores NaN en los datos. Se rellenarán con 0.")
+            model_input = model_input.fillna(0)
+        
         # Realizar predicción
-        prediction = model.predict(user_input)
-        prediction_proba = model.predict_proba(user_input)
+        prediction = model.predict(model_input)
+        
+        # Verificar si el modelo tiene predict_proba
+        if hasattr(model, 'predict_proba'):
+            prediction_proba = model.predict_proba(model_input)
+        else:
+            # Si no tiene predict_proba, usar un valor aproximado basado en la predicción
+            if prediction[0] == 1:
+                prediction_proba = np.array([[0.2, 0.8]])  # Alta probabilidad de deserción
+            else:
+                prediction_proba = np.array([[0.8, 0.2]])  # Baja probabilidad de deserción
         
         # Mostrar resultados
         st.subheader("Resultados de la Predicción")
@@ -273,29 +318,60 @@ if st.button("Predecir Probabilidad de Deserción"):
         col1, col2 = st.columns(2)
         
         with col1:
-            st.metric("Predicción", "Deserción" if prediction[0] == 1 else "No Deserción")
+            result_text = "Deserción" if prediction[0] == 1 else "No Deserción"
+            st.metric("Predicción", result_text)
         
         with col2:
-            st.metric("Probabilidad de Deserción", f"{prediction_proba[0][1]*100:.2f}%")
+            prob_desercion = prediction_proba[0][1] if len(prediction_proba[0]) > 1 else prediction_proba[0][0]
+            st.metric("Probabilidad de Deserción", f"{prob_desercion*100:.2f}%")
         
         # Mostrar gráfico de probabilidad
-        st.progress(int(prediction_proba[0][1]*100))
+        st.progress(int(prob_desercion*100))
         
         # Interpretación de resultados
         if prediction[0] == 1:
-            st.warning("El estudiante tiene alto riesgo de deserción. Se recomienda intervención.")
+            st.warning("⚠️ El estudiante tiene alto riesgo de deserción. Se recomienda intervención.")
         else:
-            st.success("El estudiante tiene bajo riesgo de deserción.")
+            st.success("✅ El estudiante tiene bajo riesgo de deserción.")
         
         # Explicación de factores (simplificada)
         st.subheader("Factores Clave")
         st.markdown("""
         Los principales factores que influyen en esta predicción incluyen:
-        - Rendimiento académico en el primer y segundo semestre
-        - Situación económica (becas, deudas, pago de matrícula)
-        - Indicadores macroeconómicos (desempleo, inflación)
-        - Características demográficas y educativas previas
+        - **Rendimiento académico**: Calificaciones y unidades curriculares del primer y segundo semestre
+        - **Situación económica**: Becas, deudas, pago de matrícula al día
+        - **Indicadores macroeconómicos**: Tasa de desempleo, inflación, PIB
+        - **Características personales**: Edad, género, estado civil
+        - **Antecedentes educativos**: Calificación previa, tipo de educación
+        - **Contexto familiar**: Educación y ocupación de los padres
         """)
+        
+        # Recomendaciones basadas en el riesgo
+        if prediction[0] == 1:
+            st.subheader("Recomendaciones de Intervención")
+            st.markdown("""
+            **Acciones sugeridas para reducir el riesgo de deserción:**
+            - 🎯 Proporcionar tutorías académicas personalizadas
+            - 💰 Evaluar opciones de apoyo financiero adicional
+            - 👥 Asignar un mentor o consejero estudiantil
+            - 📚 Ofrecer programas de nivelación académica
+            - 🤝 Facilitar grupos de estudio y apoyo entre pares
+            - 📞 Establecer seguimiento regular del progreso académico
+            """)
         
     except Exception as e:
         st.error(f"Error al realizar la predicción: {e}")
+        st.error(f"Tipo de error: {type(e)}")
+        
+        # Información adicional para debug
+        st.subheader("Información de Debug")
+        st.write("Si el error persiste, verifica:")
+        st.write("1. Que el archivo del modelo sea el correcto")
+        st.write("2. Que las columnas del modelo coincidan con las esperadas")
+        st.write("3. Que el modelo fue entrenado con la versión correcta de scikit-learn/xgboost")
+        
+        # Mostrar estructura de los datos para debug
+        model_input = prepare_data_for_model(user_data)
+        st.write(f"Columnas de entrada: {model_input.columns.tolist()}")
+        st.write(f"Primeras filas de datos:")
+        st.write(model_input.head())
