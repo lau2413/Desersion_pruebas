@@ -2,7 +2,6 @@ import streamlit as st
 import pandas as pd
 import joblib
 import numpy as np
-import warnings
 
 # Limpiar cache si hay cambios
 if st.button("🗑️ Limpiar Cache", help="Presiona si hay problemas con el modelo"):
@@ -106,7 +105,37 @@ with st.form("formulario"):
 
     submit = st.form_submit_button("Predecir")
 
-# Procesamiento y predicción
+    # Validación del modelo antes de procesar
+    st.write("**🔍 Validación del Modelo:**")
+    try:
+        # Verificar integridad del pipeline
+        model_ok = True
+        validation_messages = []
+        
+        for step_name, step_obj in modelo.named_steps.items():
+            if isinstance(step_obj, str):
+                validation_messages.append(f"❌ Error: '{step_name}' es un string en lugar de un objeto")
+                model_ok = False
+            else:
+                validation_messages.append(f"✅ '{step_name}': {type(step_obj).__name__}")
+        
+        for msg in validation_messages:
+            if "❌" in msg:
+                st.error(msg)
+            else:
+                st.success(msg)
+        
+        if not model_ok:
+            st.error("**El modelo está corrupto. Necesitas regenerarlo o usar una versión compatible.**")
+            st.stop()
+        else:
+            st.success("**Modelo validado correctamente**")
+            
+    except Exception as validation_error:
+        st.error(f"Error en validación del modelo: {validation_error}")
+        st.stop()
+
+    # Procesamiento y predicción
 if submit:
     datos = {col: 0 for col in modelo.feature_names_in_}
 
@@ -241,14 +270,127 @@ if submit:
 
     except Exception as e:
         st.error(f"❌ Error en la predicción: {str(e)}")
-        with st.expander("Detalles técnicos"):
-            st.write("Tipo de error:", type(e).__name__)
-            st.write("Mensaje completo:", str(e))
+        
+        with st.expander("🔍 Debugging Detallado", expanded=True):
+            st.write("**Información del Error:**")
+            st.write(f"- Tipo de error: `{type(e).__name__}`")
+            st.write(f"- Mensaje completo: `{str(e)}`")
+            
+            # Información del modelo
+            st.write("**Información del Modelo:**")
+            try:
+                st.write(f"- Tipo de modelo: `{type(modelo)}`")
+                st.write(f"- Pasos del pipeline: `{list(modelo.named_steps.keys())}`")
+                
+                # Verificar cada paso del pipeline
+                for step_name, step_obj in modelo.named_steps.items():
+                    st.write(f"- {step_name}: `{type(step_obj)}`")
+                    
+                    # Si es el preprocessor, mostrar más detalles
+                    if step_name == 'preprocessor':
+                        st.write("  **Transformers en preprocessor:**")
+                        for i, (name, transformer, columns) in enumerate(step_obj.transformers_):
+                            st.write(f"    - {i}: {name} -> `{type(transformer)}` -> {len(columns) if hasattr(columns, '__len__') else 'N/A'} columnas")
+                            # Verificar si el transformer es una string (problema común)
+                            if isinstance(transformer, str):
+                                st.error(f"    ⚠️ PROBLEMA: Transformer {name} es un string: '{transformer}'")
+                
+            except Exception as model_error:
+                st.error(f"Error inspeccionando modelo: {model_error}")
+            
+            # Información de los datos
+            st.write("**Información de los Datos:**")
             if 'X_array' in locals():
-                st.write("Shape de los datos:", X_array.shape)
-                st.write("Tipos de datos:", X_array.dtype)
-                st.write("Valores mínimos:", X_array.min(axis=0))
-                st.write("Valores máximos:", X_array.max(axis=0))
+                st.write(f"- Shape de los datos: `{X_array.shape}`")
+                st.write(f"- Tipos de datos del array: `{X_array.dtype}`")
+                st.write(f"- Valores mínimos: `{X_array.min()}`")
+                st.write(f"- Valores máximos: `{X_array.max()}`")
+                st.write(f"- Contiene NaN: `{np.isnan(X_array).any()}`")
+                st.write(f"- Contiene Inf: `{np.isinf(X_array).any()}`")
             else:
-                st.write("Error antes de crear X_array")
-                st.write("Tipos de X:", X.dtypes)
+                st.write("- Error antes de crear X_array")
+            
+            if 'X' in locals():
+                st.write("**DataFrame X:**")
+                st.write(f"- Shape: `{X.shape}`")
+                st.write(f"- Columnas: `{len(X.columns)}`")
+                st.write(f"- Features esperadas por modelo: `{len(modelo.feature_names_in_)}`")
+                
+                # Verificar si las columnas coinciden
+                missing_features = set(modelo.feature_names_in_) - set(X.columns)
+                extra_features = set(X.columns) - set(modelo.feature_names_in_)
+                
+                if missing_features:
+                    st.error(f"- ⚠️ Features faltantes: `{list(missing_features)[:5]}...` ({len(missing_features)} total)")
+                if extra_features:
+                    st.warning(f"- ⚠️ Features extra: `{list(extra_features)[:5]}...` ({len(extra_features)} total)")
+                
+                # Mostrar tipos de datos problemáticos
+                problematic_types = {}
+                for col in X.columns:
+                    dtype_str = str(X[col].dtype)
+                    if dtype_str not in ['float64', 'int64']:
+                        problematic_types[col] = dtype_str
+                
+                if problematic_types:
+                    st.error("- ⚠️ Tipos de datos problemáticos:")
+                    for col, dtype in list(problematic_types.items())[:10]:  # Mostrar solo los primeros 10
+                        st.write(f"    - `{col}`: `{dtype}`")
+                    if len(problematic_types) > 10:
+                        st.write(f"    - ... y {len(problematic_types) - 10} más")
+                
+                # Verificar valores únicos en columnas categóricas
+                categorical_issues = []
+                for col in X.columns:
+                    if col.startswith(("Marital status_", "Application mode_", "Course_")):
+                        unique_vals = X[col].unique()
+                        if len(unique_vals) > 2 or any(val not in [0, 1] for val in unique_vals):
+                            categorical_issues.append((col, unique_vals))
+                
+                if categorical_issues:
+                    st.error("- ⚠️ Problemas en variables categóricas:")
+                    for col, vals in categorical_issues[:5]:
+                        st.write(f"    - `{col}`: valores únicos `{vals}`")
+            
+            # Intentar identificar dónde falla específicamente
+            st.write("**Diagnóstico del Error:**")
+            try:
+                # Intentar cada paso del pipeline por separado
+                st.write("Probando cada paso del pipeline...")
+                
+                current_data = X
+                for step_name, step_obj in modelo.named_steps.items():
+                    try:
+                        st.write(f"- Probando paso '{step_name}'...")
+                        
+                        # Verificar si es un string (error común)
+                        if isinstance(step_obj, str):
+                            st.error(f"  ❌ PROBLEMA ENCONTRADO: '{step_name}' es un string: '{step_obj}'")
+                            st.write("  **Solución:** El modelo parece estar corrupto. Necesitas regenerarlo.")
+                            break
+                        
+                        if hasattr(step_obj, 'transform'):
+                            current_data = step_obj.transform(current_data)
+                            st.success(f"  ✅ '{step_name}' funcionó correctamente")
+                        elif hasattr(step_obj, 'predict'):
+                            # Es el clasificador final
+                            prediction = step_obj.predict(current_data)
+                            st.success(f"  ✅ '{step_name}' (clasificador) funcionó correctamente")
+                        else:
+                            st.warning(f"  ⚠️ '{step_name}' no tiene método transform ni predict")
+                            
+                    except Exception as step_error:
+                        st.error(f"  ❌ Error en paso '{step_name}': {step_error}")
+                        st.write(f"     Tipo de objeto: `{type(step_obj)}`")
+                        st.write(f"     Métodos disponibles: `{[m for m in dir(step_obj) if not m.startswith('_')][:10]}`")
+                        break
+                        
+            except Exception as debug_error:
+                st.error(f"Error en diagnóstico: {debug_error}")
+            
+            # Recomendaciones de solución
+            st.write("**Posibles Soluciones:**")
+            st.write("1. **Regenerar el modelo:** El pipeline puede estar corrupto")
+            st.write("2. **Verificar versiones:** Incompatibilidad entre versiones de sklearn")
+            st.write("3. **Limpiar cache:** Usar el botón 'Limpiar Cache' arriba")
+            st.write("4. **Re-entrenar:** Crear un nuevo modelo desde cero"))
