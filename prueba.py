@@ -144,20 +144,18 @@ if submit:
     # 4. Crear DataFrame asegurando tipos de datos correctos
     X = pd.DataFrame([datos])[modelo.feature_names_in_]
     
-    # Conversión explícita de tipos de datos
     for col in X.columns:
-        # Convertir columnas dummy a int8 (más eficiente)
-        if col.startswith(("Marital status_", "Application mode_", "Course_", 
-                         "Previous qualification_", "Nacionality_",
-                         "Mother's qualification_", "Father's qualification_",
-                         "Mother's occupation_", "Father's occupation_")):
-            X[col] = X[col].astype('int8')
-        # Convertir columnas numéricas a float32
-        elif col in scaler_features:
-            X[col] = pd.to_numeric(X[col], errors='coerce').astype('float32')
-        # Resto de columnas a tipos adecuados
-        else:
-            X[col] = pd.to_numeric(X[col], errors='ignore')
+    if col.startswith(("Marital status_", "Application mode_", "Course_", 
+                       "Previous qualification_", "Nacionality_",
+                       "Mother's qualification_", "Father's qualification_",
+                       "Mother's occupation_", "Father's occupation_")):
+        X[col] = X[col].astype('int8')
+    elif col in scaler_features:
+        X[col] = pd.to_numeric(X[col], errors='coerce').astype('float32')
+    else:
+        # ❗ Antes decía: errors='ignore'
+        X[col] = pd.to_numeric(X[col], errors='coerce').astype('float32')
+
     
     # Verificación final de tipos
     with st.expander("🔍 Verificación de Tipos de Datos"):
