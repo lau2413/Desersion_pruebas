@@ -393,4 +393,4 @@ if submit:
             st.write("1. **Regenerar el modelo:** El pipeline puede estar corrupto")
             st.write("2. **Verificar versiones:** Incompatibilidad entre versiones de sklearn")
             st.write("3. **Limpiar cache:** Usar el botón 'Limpiar Cache' arriba")
-            st.write("4. **Re-entrenar:** Crear un nuevo modelo desde cero"))
+            st.write("4. **Re-entrenar:** Crear un nuevo modelo desde cero")
