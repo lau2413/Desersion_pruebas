@@ -2,6 +2,7 @@ import streamlit as st
 import pandas as pd
 import joblib
 import numpy as np
+import warnings
 
 # Limpiar cache si hay cambios
 if st.button("🗑️ Limpiar Cache", help="Presiona si hay problemas con el modelo"):
