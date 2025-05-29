@@ -9,13 +9,21 @@ def cargar_modelo():
 
 modelo = cargar_modelo()
 
-st.title("🎓 Predicción de Deserción Estudiantil")
+# Verificación del modelo cargado
+st.sidebar.subheader("🔍 Información del Modelo")
+try:
+    st.sidebar.write("Pasos del pipeline:", list(modelo.named_steps.keys()))
+    if 'preprocessor' in modelo.named_steps:
+        st.sidebar.write("Transformers:", modelo.named_steps['preprocessor'].transformers_)
+    st.sidebar.write("Número de features esperadas:", len(modelo.feature_names_in_))
+except Exception as e:
+    st.sidebar.error(f"Error al inspeccionar modelo: {str(e)}")
 
+st.title("🎓 Predicción de Deserción Estudiantil")
 st.markdown("Completa los datos del estudiante para predecir si existe riesgo de deserción.")
 
 # Formulario de entrada
 with st.form("formulario"):
-
     st.subheader("🧑‍🎓 Información general")
     col1, col2 = st.columns(2)
 
@@ -37,7 +45,6 @@ with st.form("formulario"):
         gdp = st.slider("PIB (GDP)", 0.0, 20.0, 5.0)
 
     st.subheader("📚 Rendimiento académico")
-
     col3, col4 = st.columns(2)
 
     with col3:
@@ -53,8 +60,6 @@ with st.form("formulario"):
         grade2 = st.number_input("Nota 2do semestre", 0.0, 20.0, 13.0)
 
     st.subheader("📌 Selección de categoría")
-
-    # Dummies activas (solo una por grupo)
     marital = st.selectbox("Estado civil", ["Divorced", "FactoUnion", "Separated", "Single"])
     app_mode = st.selectbox("Modalidad de ingreso", [
         "Admisión Especial", "Admisión Regular", "Admisión por Ordenanza",
@@ -91,8 +96,11 @@ with st.form("formulario"):
 
 # Procesamiento y predicción
 if submit:
-    # Datos numéricos
-    datos = {
+    # Crear diccionario con todos los valores esperados en 0 primero
+    datos = {col: 0 for col in modelo.feature_names_in_}
+    
+    # Actualizar con los valores del formulario
+    datos.update({
         "Application order": application_order,
         "Daytime/evening attendance": 1 if attendance == "Diurno" else 0,
         "Previous qualification (grade)": prev_grade,
@@ -114,8 +122,8 @@ if submit:
         "Unemployment rate": unemployment,
         "Inflation rate": inflation,
         "GDP": gdp
-    }
-
+    })
+    
     # Agregar dummies (solo una activa por grupo)
     dummy_cols = [
         ("Marital status", marital),
@@ -128,38 +136,53 @@ if submit:
         ("Mother's occupation", mo),
         ("Father's occupation", fo)
     ]
-
+    
     for grupo, valor in dummy_cols:
         colname = f"{grupo}_{valor}"
-        datos[colname] = 1
-
-    # Agregar el resto de columnas esperadas (rellenar con 0 las faltantes)
-    for col in modelo.feature_names_in_:
-        if col not in datos:
-            datos[col] = 0
-    print("Columnas esperadas por el modelo:")
-    print(modelo.feature_names_in_)
-    print("\nClaves del diccionario 'datos':")
-    print(list(datos.keys()))
-
-    # Crear DataFrame con el orden exacto
+        # Verificar si la columna existe en las features esperadas
+        if colname in modelo.feature_names_in_:
+            datos[colname] = 1
+        else:
+            st.warning(f"Columna no encontrada en el modelo: {colname}")
+    
+    # Crear DataFrame asegurando el orden correcto
     X = pd.DataFrame([datos])[modelo.feature_names_in_]
-    st.write("Shape de X:", X.shape)
-    st.write("Columnas de X:", X.columns.tolist())
-    st.write("Primeros datos:")
-    st.write(X.head())
-    st.write("Tipos de columnas de X:")
-    st.write(X.dtypes)
-
-
-    # Predicción
-    pred = modelo.predict(X)[0]
-    proba = modelo.predict_proba(X)[0][1]
-
-    # Mostrar resultado
-    st.subheader("📈 Resultado de la predicción:")
-    if pred == 1:
-        st.error(f"🚨 El estudiante tiene riesgo de **deserción**.\n\nProbabilidad: {proba:.2%}")
-    else:
-        st.success(f"✅ El estudiante **no tiene riesgo de deserción**.\n\nProbabilidad: {proba:.2%}")
-
+    
+    # Verificación detallada
+    with st.expander("🔍 Ver detalles de los datos enviados al modelo"):
+        st.subheader("Información de Entrada")
+        st.write("Número de columnas:", len(X.columns))
+        st.write("Columnas faltantes en el modelo:", set(modelo.feature_names_in_) - set(X.columns))
+        st.write("Columnas extra en los datos:", set(X.columns) - set(modelo.feature_names_in_))
+        st.write("Tipos de datos:", X.dtypes)
+        st.write("Primeras filas:", X.head())
+    
+    try:
+        # Predicción con manejo de errores
+        with st.spinner("Realizando predicción..."):
+            pred = modelo.predict(X)[0]
+            proba = modelo.predict_proba(X)[0][1]
+        
+        # Mostrar resultado
+        st.subheader("📈 Resultado de la predicción:")
+        if pred == 1:
+            st.error(f"🚨 El estudiante tiene riesgo de **deserción**.\n\nProbabilidad: {proba:.2%}")
+        else:
+            st.success(f"✅ El estudiante **no tiene riesgo de deserción**.\n\nProbabilidad: {proba:.2%}")
+            
+    except Exception as e:
+        st.error(f"❌ Error durante la predicción: {str(e)}")
+        with st.expander("⚠️ Detalles técnicos del error"):
+            st.write(f"Tipo de error: {type(e).__name__}")
+            st.write("Shape de X:", X.shape)
+            st.write("Columnas en X:", X.columns.tolist())
+            st.write("Valores en X:", X.values)
+            st.write("Tipos de datos:", X.dtypes)
+            
+            # Información adicional para debugging
+            st.write("\nInformación del modelo:")
+            try:
+                st.write("Features esperadas:", modelo.feature_names_in_)
+                st.write("Número de features esperadas:", len(modelo.feature_names_in_))
+            except Exception as model_error:
+                st.write("Error al obtener info del modelo:", str(model_error))
