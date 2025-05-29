@@ -3,6 +3,11 @@ import pandas as pd
 import joblib
 import numpy as np
 
+# Limpiar cache si hay cambios
+if st.button("🗑️ Limpiar Cache", help="Presiona si hay problemas con el modelo"):
+    st.cache_resource.clear()
+    st.rerun()
+
 # Cargar el modelo (pipeline completo)
 @st.cache_resource
 def cargar_modelo():
@@ -138,49 +143,76 @@ if submit:
 
     X = pd.DataFrame([datos])[modelo.feature_names_in_]
 
-    # Conversión de tipos de datos corregida
+    # Conversión de tipos de datos corregida - usar tipos nativos de Python/numpy
     for col in X.columns:
         if col.startswith(("Marital status_", "Application mode_", "Course_",
                            "Previous qualification_", "Nacionality_",
                            "Mother's qualification_", "Father's qualification_",
                            "Mother's occupation_", "Father's occupation_")):
-            # Usar int32 en lugar de int8 para compatibilidad con Arrow
-            X[col] = X[col].astype('int32')
+            # Convertir a int nativo de Python primero, luego a numpy
+            X[col] = X[col].astype(int).astype('int64')
         elif col in scaler_features:
-            # Conversión segura sin errors='ignore'
+            # Conversión segura a float64 (más compatible)
             try:
-                X[col] = pd.to_numeric(X[col]).astype('float32')
+                X[col] = pd.to_numeric(X[col], downcast=None).astype('float64')
             except (ValueError, TypeError):
-                X[col] = X[col].astype('float32')
+                X[col] = X[col].astype('float64')
         else:
-            # Conversión segura sin errors='ignore'
+            # Conversión a tipos básicos
             try:
-                X[col] = pd.to_numeric(X[col])
+                X[col] = pd.to_numeric(X[col], downcast=None)
             except (ValueError, TypeError):
                 pass  # Mantener el tipo original si no se puede convertir
+    
+    # Forzar conversión final a tipos compatibles con Arrow
+    X = X.astype({col: 'float64' if X[col].dtype in ['int64', 'float32', 'float64'] 
+                  else str for col in X.columns})
 
     with st.expander("🔍 Verificación de Tipos de Datos"):
         st.write("Tipos de datos finales:")
-        # Usar value_counts() de forma más segura
-        dtype_counts = X.dtypes.value_counts()
-        st.write(dtype_counts)
-        object_cols = X.select_dtypes(include=['object']).columns.tolist()
-        st.write("Columnas problemáticas:", object_cols)
+        # Mostrar tipos sin usar st.write con el DataFrame completo
+        dtype_info = {}
+        for col in X.columns:
+            dtype_info[col] = str(X[col].dtype)
+        
+        # Contar tipos
+        dtype_counts = {}
+        for dtype in dtype_info.values():
+            dtype_counts[dtype] = dtype_counts.get(dtype, 0) + 1
+        
+        st.write("Conteo de tipos:")
+        for dtype, count in dtype_counts.items():
+            st.write(f"- {dtype}: {count} columnas")
+        
+        object_cols = [col for col, dtype in dtype_info.items() if 'object' in dtype]
+        if object_cols:
+            st.write("Columnas problemáticas:", object_cols)
 
     try:
         if X.isnull().any().any():
             st.error("Error: Existen valores nulos en los datos")
-            null_summary = X.isnull().sum()
-            st.write(null_summary[null_summary > 0])
+            # Mostrar información de nulos sin serializar todo el DataFrame
+            null_cols = []
+            for col in X.columns:
+                if X[col].isnull().any():
+                    null_count = X[col].isnull().sum()
+                    null_cols.append(f"{col}: {null_count} nulos")
+            
+            if null_cols:
+                st.write("Columnas con valores nulos:")
+                for info in null_cols:
+                    st.write(f"- {info}")
             st.stop()
 
         # Conversión final a array con manejo de errores
         try:
-            X_array = X.values.astype('float32')
+            X_array = X.values.astype('float64')  # Usar float64 más compatible
         except (ValueError, TypeError) as e:
             st.error(f"Error en la conversión de tipos: {str(e)}")
             st.write("Tipos de datos actuales:")
-            st.write(X.dtypes)
+            # Evitar mostrar el DataFrame completo para prevenir el error de Arrow
+            for col in X.columns:
+                st.write(f"{col}: {X[col].dtype}")
             st.stop()
 
         with st.spinner("Realizando predicción..."):
@@ -206,5 +238,3 @@ if submit:
             else:
                 st.write("Error antes de crear X_array")
                 st.write("Tipos de X:", X.dtypes)
-
-
