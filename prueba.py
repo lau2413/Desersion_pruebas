@@ -144,6 +144,13 @@ if submit:
 
     # Crear DataFrame con el orden exacto
     X = pd.DataFrame([datos])[modelo.feature_names_in_]
+    st.write("Shape de X:", X.shape)
+    st.write("Columnas de X:", X.columns.tolist())
+    st.write("Primeros datos:")
+    st.write(X.head())
+    st.write("Tipos de columnas de X:")
+    st.write(X.dtypes)
+
 
     # Predicción
     pred = modelo.predict(X)[0]
