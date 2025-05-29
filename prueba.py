@@ -139,58 +139,60 @@ if submit:
             if col_name in modelo.feature_names_in_:
                 datos[col_name] = 1 if option == selected else 0
     
-    # 4. Crear DataFrame con el orden exacto que espera el modelo
+    # [Todo el código anterior permanece igual hasta la creación del DataFrame X]
+
+    # 4. Crear DataFrame asegurando tipos de datos correctos
     X = pd.DataFrame([datos])[modelo.feature_names_in_]
     
-    # Verificación detallada
-    with st.expander("🔍 Ver detalles de los datos enviados"):
-        st.write("Número de columnas:", len(X.columns))
-        
-        missing_cols = set(modelo.feature_names_in_) - set(X.columns)
-        extra_cols = set(X.columns) - set(modelo.feature_names_in_)
-        
-        if missing_cols:
-            st.warning(f"Columnas faltantes: {missing_cols}")
-        if extra_cols:
-            st.warning(f"Columnas extra: {extra_cols}")
-        
-        st.write("Valores de ejemplo:")
-        st.write(X.iloc[0, :20])  # Mostrar primeras 20 columnas
-        st.write("...")
-        st.write(X.iloc[0, 20:40])
-        st.write("...")
-        st.write(X.iloc[0, 40:60])
-        st.write("...")
-        st.write(X.iloc[0, 60:])
-        
-        st.write("Tipos de datos:", X.dtypes)
+    # Conversión explícita de tipos de datos
+    for col in X.columns:
+        # Convertir columnas dummy a int8 (más eficiente)
+        if col.startswith(("Marital status_", "Application mode_", "Course_", 
+                         "Previous qualification_", "Nacionality_",
+                         "Mother's qualification_", "Father's qualification_",
+                         "Mother's occupation_", "Father's occupation_")):
+            X[col] = X[col].astype('int8')
+        # Convertir columnas numéricas a float32
+        elif col in scaler_features:
+            X[col] = pd.to_numeric(X[col], errors='coerce').astype('float32')
+        # Resto de columnas a tipos adecuados
+        else:
+            X[col] = pd.to_numeric(X[col], errors='ignore')
     
-    # Realizar predicción
+    # Verificación final de tipos
+    with st.expander("🔍 Verificación de Tipos de Datos"):
+        st.write("Tipos de datos finales:")
+        st.write(X.dtypes.value_counts())
+        st.write("Columnas problemáticas:", X.columns[X.dtypes == 'object'])
+    
+    # PREDICCIÓN CON MANEJO DE ERRORES MEJORADO
     try:
+        # Verificación adicional de datos
+        if X.isnull().any().any():
+            st.error("Error: Existen valores nulos en los datos")
+            st.write(X.isnull().sum())
+            st.stop()
+            
+        # Convertir a numpy array para evitar problemas con Arrow
+        X_array = X.values.astype('float32')
+        
         with st.spinner("Realizando predicción..."):
-            pred = modelo.predict(X)[0]
-            proba = modelo.predict_proba(X)[0][1]
+            # Predicción directa con array numpy
+            pred = modelo.predict(X_array)[0]
+            proba = modelo.predict_proba(X_array)[0][1]
         
         # Mostrar resultado
         st.subheader("📈 Resultado de la predicción:")
         if pred == 1:
-            st.error(f"🚨 El estudiante tiene riesgo de **deserción**.\n\nProbabilidad: {proba:.2%}")
+            st.error(f"🚨 Riesgo de deserción (Probabilidad: {proba:.2%})")
         else:
-            st.success(f"✅ El estudiante **no tiene riesgo de deserción**.\n\nProbabilidad: {proba:.2%}")
+            st.success(f"✅ Sin riesgo de deserción (Probabilidad: {proba:.2%})")
             
     except Exception as e:
-        st.error(f"❌ Error durante la predicción: {str(e)}")
-        with st.expander("⚠️ Detalles técnicos del error"):
-            st.write(f"Tipo de error: {type(e).__name__}")
-            st.write("Shape de X:", X.shape)
-            st.write("Columnas en X:", X.columns.tolist())
-            st.write("Valores no nulos:", X.notnull().sum())
-            
-            # Comparar con las features esperadas
-            st.write("\nComparación con features esperadas:")
-            st.write("Total features esperadas:", len(modelo.feature_names_in_))
-            st.write("Features en datos:", len(X.columns))
-            
-            # Mostrar diferencias
-            st.write("\nPrimeras 10 features esperadas:", modelo.feature_names_in_[:10])
-            st.write("Primeras 10 features en datos:", X.columns.tolist()[:10])
+        st.error(f"❌ Error en la predicción: {str(e)}")
+        with st.expander("Detalles técnicos"):
+            st.write("Tipo de error:", type(e).__name__)
+            st.write("Shape de los datos:", X_array.shape)
+            st.write("Tipos de datos:", X_array.dtype)
+            st.write("Valores mínimos:", X_array.min(axis=0))
+            st.write("Valores máximos:", X_array.max(axis=0))
