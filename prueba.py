@@ -13,16 +13,26 @@ if st.button("🗑️ Limpiar Cache", help="Presiona si hay problemas con el mod
 def cargar_modelo():
     return joblib.load("pipeline_final_desercion.pkl")
 
-modelo = cargar_modelo()
+try:
+    modelo = cargar_modelo()
+    
+    # Información del modelo en el sidebar
+    st.sidebar.subheader("🔍 Información del Modelo")
+    st.sidebar.write("Pasos del pipeline:", list(modelo.named_steps.keys()))
+    st.sidebar.write("Número de features esperadas:", len(modelo.feature_names_in_))
+    
+    # Verificar compatibilidad del modelo
+    import sklearn
+    st.sidebar.info(f"Scikit-learn actual: {sklearn.__version__}")
+    st.sidebar.warning("⚠️ Modelo entrenado con sklearn 1.1.3, ejecutándose con versión actual")
+    
+    # Mostrar algunas features importantes
+    scaler_features = modelo.named_steps['preprocessor'].transformers_[0][2]
+    st.sidebar.write("Features escaladas:", scaler_features)
 
-# Información del modelo en el sidebar
-st.sidebar.subheader("🔍 Información del Modelo")
-st.sidebar.write("Pasos del pipeline:", list(modelo.named_steps.keys()))
-st.sidebar.write("Número de features esperadas:", len(modelo.feature_names_in_))
-
-# Mostrar algunas features importantes
-scaler_features = modelo.named_steps['preprocessor'].transformers_[0][2]
-st.sidebar.write("Features escaladas:", scaler_features)
+except Exception as e:
+    st.error("No se pudo cargar el modelo correctamente")
+    st.stop()
 
 st.title("🎓 Predicción de Deserción Estudiantil")
 st.markdown("Completa los datos del estudiante para predecir si existe riesgo de deserción.")
@@ -216,8 +226,11 @@ if submit:
             st.stop()
 
         with st.spinner("Realizando predicción..."):
-            pred = modelo.predict(X)[0]
-            proba = modelo.predict_proba(X)[0][1]
+            # Hacer predicción con manejo de warnings
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore")
+                pred = modelo.predict(X)[0]
+                proba = modelo.predict_proba(X)[0][1]
 
         st.subheader("📈 Resultado de la predicción:")
         if pred == 1:
