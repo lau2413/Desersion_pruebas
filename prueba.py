@@ -1,6 +1,7 @@
 import streamlit as st
 import pandas as pd
 import joblib
+import numpy as np
 
 # Cargar el modelo (pipeline completo)
 @st.cache_resource
@@ -60,6 +61,7 @@ with st.form("formulario"):
 
     st.subheader("📌 Selección de categoría")
 
+    # Opciones para variables categóricas
     marital_options = ["Divorced", "FactoUnion", "Separated", "Single"]
     app_mode_options = ["Admisión Especial", "Admisión Regular", "Admisión por Ordenanza",
                         "Cambios/Transferencias", "Estudiantes Internacionales", "Mayores de 23 años"]
@@ -87,16 +89,6 @@ with st.form("formulario"):
     fo = st.selectbox("Ocupación del padre", fo_options)
 
     submit = st.form_submit_button("Predecir")
-
-# Función para garantizar compatibilidad con Arrow
-def asegurar_tipos_arrow_compatibles(df):
-    df_arrow = df.copy()
-    for col in df_arrow.columns:
-        try:
-            df_arrow[col] = pd.to_numeric(df_arrow[col])
-        except (ValueError, TypeError):
-            pass
-    return df_arrow
 
 # Procesamiento y predicción
 if submit:
@@ -146,23 +138,49 @@ if submit:
 
     X = pd.DataFrame([datos])[modelo.feature_names_in_]
 
+    # Conversión de tipos de datos corregida
     for col in X.columns:
-        try:
-            X[col] = pd.to_numeric(X[col])
-        except (ValueError, TypeError):
-            pass
+        if col.startswith(("Marital status_", "Application mode_", "Course_",
+                           "Previous qualification_", "Nacionality_",
+                           "Mother's qualification_", "Father's qualification_",
+                           "Mother's occupation_", "Father's occupation_")):
+            # Usar int32 en lugar de int8 para compatibilidad con Arrow
+            X[col] = X[col].astype('int32')
+        elif col in scaler_features:
+            # Conversión segura sin errors='ignore'
+            try:
+                X[col] = pd.to_numeric(X[col]).astype('float32')
+            except (ValueError, TypeError):
+                X[col] = X[col].astype('float32')
+        else:
+            # Conversión segura sin errors='ignore'
+            try:
+                X[col] = pd.to_numeric(X[col])
+            except (ValueError, TypeError):
+                pass  # Mantener el tipo original si no se puede convertir
 
     with st.expander("🔍 Verificación de Tipos de Datos"):
         st.write("Tipos de datos finales:")
-        st.write(X.dtypes.value_counts())
-        st.write("Vista del DataFrame (compatibilidad Arrow):")
-        st.write(asegurar_tipos_arrow_compatibles(X))
-        st.write("Columnas problemáticas:", X.columns[X.dtypes == 'object'])
+        # Usar value_counts() de forma más segura
+        dtype_counts = X.dtypes.value_counts()
+        st.write(dtype_counts)
+        object_cols = X.select_dtypes(include=['object']).columns.tolist()
+        st.write("Columnas problemáticas:", object_cols)
 
     try:
         if X.isnull().any().any():
             st.error("Error: Existen valores nulos en los datos")
-            st.write(X.isnull().sum())
+            null_summary = X.isnull().sum()
+            st.write(null_summary[null_summary > 0])
+            st.stop()
+
+        # Conversión final a array con manejo de errores
+        try:
+            X_array = X.values.astype('float32')
+        except (ValueError, TypeError) as e:
+            st.error(f"Error en la conversión de tipos: {str(e)}")
+            st.write("Tipos de datos actuales:")
+            st.write(X.dtypes)
             st.stop()
 
         with st.spinner("Realizando predicción..."):
@@ -179,8 +197,14 @@ if submit:
         st.error(f"❌ Error en la predicción: {str(e)}")
         with st.expander("Detalles técnicos"):
             st.write("Tipo de error:", type(e).__name__)
-            st.write("Shape de los datos:", X.shape)
-            st.write("Tipos de datos:", X.dtypes)
-            st.write("Vista de los datos:", X.head())
+            st.write("Mensaje completo:", str(e))
+            if 'X_array' in locals():
+                st.write("Shape de los datos:", X_array.shape)
+                st.write("Tipos de datos:", X_array.dtype)
+                st.write("Valores mínimos:", X_array.min(axis=0))
+                st.write("Valores máximos:", X_array.max(axis=0))
+            else:
+                st.write("Error antes de crear X_array")
+                st.write("Tipos de X:", X.dtypes)
 
 
