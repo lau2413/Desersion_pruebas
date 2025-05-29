@@ -162,8 +162,8 @@ if submit:
         X_array = X.values.astype('float32')
 
         with st.spinner("Realizando predicción..."):
-            pred = modelo.predict(X_array)[0]
-            proba = modelo.predict_proba(X_array)[0][1]
+            pred = modelo.predict(X)[0]
+            proba = modelo.predict_proba(X)[0][1]
 
         st.subheader("📈 Resultado de la predicción:")
         if pred == 1:
