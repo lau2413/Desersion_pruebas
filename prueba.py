@@ -59,23 +59,23 @@ with st.form("formulario"):
         grade2 = st.number_input("Nota 2do semestre", 0.0, 20.0, 13.0)
 
     st.subheader("📌 Selección de categoría")
-    
+
     # Opciones para variables categóricas
     marital_options = ["Divorced", "FactoUnion", "Separated", "Single"]
     app_mode_options = ["Admisión Especial", "Admisión Regular", "Admisión por Ordenanza",
-                       "Cambios/Transferencias", "Estudiantes Internacionales", "Mayores de 23 años"]
+                        "Cambios/Transferencias", "Estudiantes Internacionales", "Mayores de 23 años"]
     course_options = ["Agricultural & Environmental Sciences", "Arts & Design", "Business & Management",
-                     "Communication & Media", "Education", "Engineering & Technology",
-                     "Health Sciences", "Social Sciences"]
+                      "Communication & Media", "Education", "Engineering & Technology",
+                      "Health Sciences", "Social Sciences"]
     prev_qual_options = ["Higher Education", "Other", "Secondary Education", "Technical Education"]
     nacionality_options = ["Colombian", "Cuban", "Dutch", "English", "German", "Italian", "Lithuanian",
-                          "Moldovan", "Mozambican", "Portuguese", "Romanian", "Santomean", "Turkish"]
+                           "Moldovan", "Mozambican", "Portuguese", "Romanian", "Santomean", "Turkish"]
     mq_options = ["Basic_or_Secondary", "Other_or_Unknown", "Postgraduate", "Technical_Education"]
     fq_options = ["Basic_or_Secondary", "Other_or_Unknown", "Postgraduate"]
     mo_options = ["Administrative/Clerical", "Skilled Manual Workers", "Special Cases",
-                 "Technicians/Associate Professionals", "Unskilled Workers"]
+                  "Technicians/Associate Professionals", "Unskilled Workers"]
     fo_options = ["Administrative/Clerical", "Professionals", "Skilled Manual Workers",
-                 "Special Cases", "Technicians/Associate Professionals"]
+                  "Special Cases", "Technicians/Associate Professionals"]
 
     marital = st.selectbox("Estado civil", marital_options)
     app_mode = st.selectbox("Modalidad de ingreso", app_mode_options)
@@ -91,10 +91,8 @@ with st.form("formulario"):
 
 # Procesamiento y predicción
 if submit:
-    # 1. Inicializar todas las features esperadas en 0
     datos = {col: 0 for col in modelo.feature_names_in_}
-    
-    # 2. Asignar valores numéricos directos
+
     datos.update({
         "Application order": application_order,
         "Daytime/evening attendance": 1 if attendance == "Diurno" else 0,
@@ -118,9 +116,7 @@ if submit:
         "Inflation rate": inflation,
         "GDP": gdp
     })
-    
-    # 3. Asignar variables categóricas (one-hot)
-    # Mapeo de opciones del formulario a nombres de columnas esperados
+
     category_mappings = {
         "Marital status": (marital_options, marital),
         "Application mode": (app_mode_options, app_mode),
@@ -132,60 +128,49 @@ if submit:
         "Mother's occupation": (mo_options, mo),
         "Father's occupation": (fo_options, fo)
     }
-    
+
     for base_name, (options, selected) in category_mappings.items():
         for option in options:
             col_name = f"{base_name}_{option}"
             if col_name in modelo.feature_names_in_:
                 datos[col_name] = 1 if option == selected else 0
-    
-    # [Todo el código anterior permanece igual hasta la creación del DataFrame X]
 
-    # 4. Crear DataFrame asegurando tipos de datos correctos
     X = pd.DataFrame([datos])[modelo.feature_names_in_]
-    
-    for col in X.columns:
-    if col.startswith(("Marital status_", "Application mode_", "Course_", 
-                       "Previous qualification_", "Nacionality_",
-                       "Mother's qualification_", "Father's qualification_",
-                       "Mother's occupation_", "Father's occupation_")):
-        X[col] = X[col].astype('int8')
-    elif col in scaler_features:
-        X[col] = pd.to_numeric(X[col], errors='coerce').astype('float32')
-    else:
-        # ❗ Antes decía: errors='ignore'
-        X[col] = pd.to_numeric(X[col], errors='coerce').astype('float32')
 
-    
-    # Verificación final de tipos
+    for col in X.columns:
+        if col.startswith(("Marital status_", "Application mode_", "Course_",
+                           "Previous qualification_", "Nacionality_",
+                           "Mother's qualification_", "Father's qualification_",
+                           "Mother's occupation_", "Father's occupation_")):
+            X[col] = X[col].astype('int8')
+        elif col in scaler_features:
+            X[col] = pd.to_numeric(X[col], errors='coerce').astype('float32')
+        else:
+            X[col] = pd.to_numeric(X[col], errors='ignore')
+
     with st.expander("🔍 Verificación de Tipos de Datos"):
         st.write("Tipos de datos finales:")
         st.write(X.dtypes.value_counts())
         st.write("Columnas problemáticas:", X.columns[X.dtypes == 'object'])
-    
-    # PREDICCIÓN CON MANEJO DE ERRORES MEJORADO
+
     try:
-        # Verificación adicional de datos
         if X.isnull().any().any():
             st.error("Error: Existen valores nulos en los datos")
             st.write(X.isnull().sum())
             st.stop()
-            
-        # Convertir a numpy array para evitar problemas con Arrow
+
         X_array = X.values.astype('float32')
-        
+
         with st.spinner("Realizando predicción..."):
-            # Predicción directa con array numpy
             pred = modelo.predict(X_array)[0]
             proba = modelo.predict_proba(X_array)[0][1]
-        
-        # Mostrar resultado
+
         st.subheader("📈 Resultado de la predicción:")
         if pred == 1:
             st.error(f"🚨 Riesgo de deserción (Probabilidad: {proba:.2%})")
         else:
             st.success(f"✅ Sin riesgo de deserción (Probabilidad: {proba:.2%})")
-            
+
     except Exception as e:
         st.error(f"❌ Error en la predicción: {str(e)}")
         with st.expander("Detalles técnicos"):
@@ -194,3 +179,4 @@ if submit:
             st.write("Tipos de datos:", X_array.dtype)
             st.write("Valores mínimos:", X_array.min(axis=0))
             st.write("Valores máximos:", X_array.max(axis=0))
+
